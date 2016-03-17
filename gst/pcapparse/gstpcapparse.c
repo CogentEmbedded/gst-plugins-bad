@@ -46,6 +46,9 @@
 #include "gstpcapparse.h"
 
 #include <string.h>
+#include <glib-2.0/gobject/gparamspecs.h>
+#include <glib-2.0/gobject/gvaluetypes.h>
+#include <stdio.h>
 
 #ifndef G_OS_WIN32
 #include <arpa/inet.h>
@@ -63,7 +66,9 @@ enum
   PROP_SRC_PORT,
   PROP_DST_PORT,
   PROP_CAPS,
-  PROP_TS_OFFSET
+  PROP_TS_OFFSET,
+  PROP_ETHERTYPE,
+  PROP_MAC_ADDR
 };
 
 GST_DEBUG_CATEGORY_STATIC (gst_pcap_parse_debug);
@@ -137,6 +142,16 @@ gst_pcap_parse_class_init (GstPcapParseClass * klass)
       g_param_spec_int64 ("ts-offset", "Timestamp Offset",
           "Relative timestamp offset (ns) to apply (-1 = use absolute packet time)",
           -1, G_MAXINT64, -1, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  
+  g_object_class_install_property (gobject_class, PROP_ETHERTYPE,
+      g_param_spec_string ("ethertype", "Ethernet Protocol",
+          "Ethernet protocol to restrict to",
+          "0x800", G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  
+  g_object_class_install_property (gobject_class, PROP_MAC_ADDR,
+      g_param_spec_string ("mac-addr", "MAC Address",
+          "MAC address to restrict to",
+          "", G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   gst_element_class_add_pad_template (element_class,
       gst_static_pad_template_get (&sink_template));
@@ -173,6 +188,9 @@ gst_pcap_parse_init (GstPcapParse * self)
   self->src_port = -1;
   self->dst_port = -1;
   self->offset = -1;
+  self->mac_addr_str = NULL;
+  self->ethertype = 0x800;
+  self->ethertype_str = "0x800";
 
   self->adapter = gst_adapter_new ();
 
@@ -215,6 +233,26 @@ set_ip_address_from_string (gint64 * ip_addr, const gchar * ip_str)
   }
 }
 
+static int 
+parse_mac_to_uint(gchar *str, uint8_t *mac)
+{
+    int values[6];
+    int i;
+    //    g_print("mac = %s\n", str);
+    if (6 == sscanf(str, "%x:%x:%x:%x:%x:%x%c",
+            &values[0], &values[1], &values[2],
+            &values[3], &values[4], &values[5])) {
+        /* convert to uint8_t */
+        for (i = 0; i < 6; ++i) {
+            mac[i] = (uint8_t) values[i];
+        }
+        return 0;
+    } else {
+        /* invalid mac */
+        return -1;
+    }
+}
+
 static void
 gst_pcap_parse_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec)
@@ -245,6 +283,14 @@ gst_pcap_parse_get_property (GObject * object, guint prop_id,
     case PROP_TS_OFFSET:
       g_value_set_int64 (value, self->offset);
       break;
+      
+    case PROP_ETHERTYPE:
+        g_value_set_string(value, self->ethertype_str);
+      break;
+      
+    case PROP_MAC_ADDR:
+      g_value_set_string(value, self->mac_addr_str);
+      break;  
 
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -299,7 +345,20 @@ gst_pcap_parse_set_property (GObject * object, guint prop_id,
     case PROP_TS_OFFSET:
       self->offset = g_value_get_int64 (value);
       break;
-
+      
+  case PROP_ETHERTYPE:
+      self->ethertype_str = g_value_get_string(value);
+      self->ethertype = (guint16) strtoul(self->ethertype_str, NULL, 0);
+      break;
+  
+  case PROP_MAC_ADDR:
+      self->mac_addr_str = g_value_get_string(value);
+      if (parse_mac_to_uint(self->mac_addr_str, self->mac_addr) < 0)
+      {
+          GST_ERROR_OBJECT(object, "Invalid MAC address: %s", self->mac_addr_str);
+      }
+      break;
+      
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -360,13 +419,23 @@ gst_pcap_parse_scan_frame (GstPcapParse * self,
   guint16 src_port;
   guint16 dst_port;
   guint16 len;
+  gint vlan = 0;
 
   switch (self->linktype) {
     case LINKTYPE_ETHER:
       if (buf_size < ETH_HEADER_LEN + IP_HEADER_MIN_LEN + UDP_HEADER_LEN)
         return FALSE;
-
       eth_type = GUINT16_FROM_BE (*((guint16 *) (buf + 12)));
+      if (eth_type == 0x8100) // VLAN
+      {
+        vlan = 1;
+        eth_type = GUINT16_FROM_BE (*((guint16 *) (buf + 16)));
+        if (eth_type == 0x8100) // VLAN
+        {
+          vlan = 2;
+          eth_type = GUINT16_FROM_BE (*((guint16 *) (buf + 20)));
+        }
+      }
       buf_ip = buf + ETH_HEADER_LEN;
       break;
     case LINKTYPE_SLL:
@@ -388,65 +457,82 @@ gst_pcap_parse_scan_frame (GstPcapParse * self,
       return FALSE;
   }
 
-  if (eth_type != 0x800)
+  if (eth_type != self->ethertype)
     return FALSE;
-
-  b = *buf_ip;
-  if (((b >> 4) & 0x0f) != 4)
-    return FALSE;
-
-  ip_header_size = (b & 0x0f) * 4;
-  if (buf_ip + ip_header_size > buf + buf_size)
-    return FALSE;
-
-  ip_protocol = *(buf_ip + 9);
-  GST_LOG_OBJECT (self, "ip proto %d", (gint) ip_protocol);
-
-  if (ip_protocol != IP_PROTO_UDP && ip_protocol != IP_PROTO_TCP)
-    return FALSE;
-
-  /* ip info */
-  ip_src_addr = *((guint32 *) (buf_ip + 12));
-  ip_dst_addr = *((guint32 *) (buf_ip + 16));
-  buf_proto = buf_ip + ip_header_size;
-
-  /* ok for tcp and udp */
-  src_port = GUINT16_FROM_BE (*((guint16 *) (buf_proto + 0)));
-  dst_port = GUINT16_FROM_BE (*((guint16 *) (buf_proto + 2)));
-
-  /* extract some params and data according to protocol */
-  if (ip_protocol == IP_PROTO_UDP) {
-    len = GUINT16_FROM_BE (*((guint16 *) (buf_proto + 4)));
-    if (len < UDP_HEADER_LEN || buf_proto + len > buf + buf_size)
-      return FALSE;
-
-    *payload = buf_proto + UDP_HEADER_LEN;
-    *payload_size = len - UDP_HEADER_LEN;
-  } else {
-    if (buf_proto + 12 >= buf + buf_size)
-      return FALSE;
-    len = (buf_proto[12] >> 4) * 4;
-    if (buf_proto + len > buf + buf_size)
-      return FALSE;
-
-    /* all remaining data following tcp header is payload */
-    *payload = buf_proto + len;
-    *payload_size = self->cur_packet_size - (buf_proto - buf) - len;
+  
+  if (self->mac_addr_str)
+  {
+      guint8 mac_addr[6];
+      if (  (self->mac_addr[0] != (*((guint8 *) (buf + 6))))
+         || (self->mac_addr[1] != (*((guint8 *) (buf + 7))))
+         || (self->mac_addr[2] != (*((guint8 *) (buf + 8))))
+         || (self->mac_addr[3] != (*((guint8 *) (buf + 9))))
+         || (self->mac_addr[4] != (*((guint8 *) (buf + 10))))
+         || (self->mac_addr[5] != (*((guint8 *) (buf + 11)))))
+       return FALSE;
+      
+      *payload = buf_ip + 4 * vlan;
+      *payload_size = self->cur_packet_size - ETH_HEADER_LEN - 4 * vlan;
   }
+  
+  if (eth_type == 0x800)
+  {
+    b = *buf_ip;
+    if (((b >> 4) & 0x0f) != 4)
+        return FALSE;
 
-  /* but still filter as configured */
-  if (self->src_ip >= 0 && ip_src_addr != self->src_ip)
-    return FALSE;
+    ip_header_size = (b & 0x0f) * 4;
+    if (buf_ip + ip_header_size > buf + buf_size)
+      return FALSE;
 
-  if (self->dst_ip >= 0 && ip_dst_addr != self->dst_ip)
-    return FALSE;
+    ip_protocol = *(buf_ip + 9);
+    GST_LOG_OBJECT (self, "ip proto %d", (gint) ip_protocol);
 
-  if (self->src_port >= 0 && src_port != self->src_port)
-    return FALSE;
+    if (ip_protocol != IP_PROTO_UDP && ip_protocol != IP_PROTO_TCP)
+      return FALSE;
 
-  if (self->dst_port >= 0 && dst_port != self->dst_port)
-    return FALSE;
+    /* ip info */
+    ip_src_addr = *((guint32 *) (buf_ip + 12));
+    ip_dst_addr = *((guint32 *) (buf_ip + 16));
+    buf_proto = buf_ip + ip_header_size;
 
+    /* ok for tcp and udp */
+    src_port = GUINT16_FROM_BE (*((guint16 *) (buf_proto + 0)));
+    dst_port = GUINT16_FROM_BE (*((guint16 *) (buf_proto + 2)));
+
+    /* extract some params and data according to protocol */
+    if (ip_protocol == IP_PROTO_UDP) {
+      len = GUINT16_FROM_BE (*((guint16 *) (buf_proto + 4)));
+      if (len < UDP_HEADER_LEN || buf_proto + len > buf + buf_size)
+        return FALSE;
+
+      *payload = buf_proto + UDP_HEADER_LEN;
+      *payload_size = len - UDP_HEADER_LEN;
+    } else {
+      if (buf_proto + 12 >= buf + buf_size)
+        return FALSE;
+      len = (buf_proto[12] >> 4) * 4;
+      if (buf_proto + len > buf + buf_size)
+        return FALSE;
+
+      /* all remaining data following tcp header is payload */
+      *payload = buf_proto + len;
+      *payload_size = self->cur_packet_size - (buf_proto - buf) - len;
+    }
+
+    /* but still filter as configured */
+    if (self->src_ip >= 0 && ip_src_addr != self->src_ip)
+      return FALSE;
+
+    if (self->dst_ip >= 0 && ip_dst_addr != self->dst_ip)
+      return FALSE;
+
+    if (self->src_port >= 0 && src_port != self->src_port)
+      return FALSE;
+
+    if (self->dst_port >= 0 && dst_port != self->dst_port)
+      return FALSE;
+  }
   return TRUE;
 }
 
@@ -594,7 +680,14 @@ gst_pcap_parse_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
       if (self->caps)
         gst_pad_set_caps (self->src_pad, self->caps);
       gst_segment_init (&segment, GST_FORMAT_TIME);
-      segment.start = self->base_ts;
+      if (self->offset >= 0)
+      {
+          segment.start = self->offset;
+      } 
+      else
+      {
+        segment.start = self->base_ts;
+      }
       gst_pad_push_event (self->src_pad, gst_event_new_segment (&segment));
       self->newsegment_sent = TRUE;
     }
