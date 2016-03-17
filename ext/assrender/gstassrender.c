@@ -446,54 +446,16 @@ static gboolean
 gst_ass_render_event_src (GstPad * pad, GstObject * parent, GstEvent * event)
 {
   GstAssRender *render = GST_ASS_RENDER (parent);
-  gboolean ret = FALSE;
+  gboolean ret;
 
   GST_DEBUG_OBJECT (render, "received src event %" GST_PTR_FORMAT, event);
 
-  switch (GST_EVENT_TYPE (event)) {
-    case GST_EVENT_SEEK:{
-      GstSeekFlags flags;
-
-      if (!render->track_init_ok) {
-        GST_DEBUG_OBJECT (render, "seek received, pushing upstream");
-        ret = gst_pad_push_event (render->video_sinkpad, event);
-        return ret;
-      }
-
-      GST_DEBUG_OBJECT (render, "seek received, driving from here");
-
-      gst_event_parse_seek (event, NULL, NULL, &flags, NULL, NULL, NULL, NULL);
-
-      /* Flush downstream, only for flushing seek */
-      if (flags & GST_SEEK_FLAG_FLUSH)
-        gst_pad_push_event (render->srcpad, gst_event_new_flush_start ());
-
-      /* Mark subtitle as flushing, unblocks chains */
-      GST_ASS_RENDER_LOCK (render);
-      render->subtitle_flushing = TRUE;
-      render->video_flushing = TRUE;
-      gst_ass_render_pop_text (render);
-      GST_ASS_RENDER_UNLOCK (render);
-
-      /* Seek on each sink pad */
-      gst_event_ref (event);
-      ret = gst_pad_push_event (render->video_sinkpad, event);
-      if (ret) {
-        ret = gst_pad_push_event (render->text_sinkpad, event);
-      } else {
-        gst_event_unref (event);
-      }
-      break;
-    }
-    default:
-      if (render->track_init_ok) {
-        gst_event_ref (event);
-        ret = gst_pad_push_event (render->video_sinkpad, event);
-        gst_pad_push_event (render->text_sinkpad, event);
-      } else {
-        ret = gst_pad_push_event (render->video_sinkpad, event);
-      }
-      break;
+  /* FIXME: why not just always push it on text pad? */
+  if (render->track_init_ok) {
+    ret = gst_pad_push_event (render->video_sinkpad, gst_event_ref (event));
+    gst_pad_push_event (render->text_sinkpad, event);
+  } else {
+    ret = gst_pad_push_event (render->video_sinkpad, event);
   }
 
   return ret;
@@ -1424,7 +1386,7 @@ beach:
 }
 
 static void
-gst_ass_render_handle_tags (GstAssRender * render, GstTagList * taglist)
+gst_ass_render_handle_tag_sample (GstAssRender * render, GstSample * sample)
 {
   static const gchar *mimetypes[] = {
     "application/x-font-ttf",
@@ -1435,6 +1397,60 @@ gst_ass_render_handle_tags (GstAssRender * render, GstTagList * taglist)
     ".otf",
     ".ttf"
   };
+
+  GstBuffer *buf;
+  const GstStructure *structure;
+  gboolean valid_mimetype, valid_extension;
+  guint i;
+  const gchar *filename;
+
+  buf = gst_sample_get_buffer (sample);
+  structure = gst_sample_get_info (sample);
+
+  if (!buf || !structure)
+    return;
+
+  valid_mimetype = FALSE;
+  valid_extension = FALSE;
+
+  for (i = 0; i < G_N_ELEMENTS (mimetypes); i++) {
+    if (gst_structure_has_name (structure, mimetypes[i])) {
+      valid_mimetype = TRUE;
+      break;
+    }
+  }
+
+  filename = gst_structure_get_string (structure, "filename");
+  if (!filename)
+    return;
+
+  if (!valid_mimetype) {
+    guint len = strlen (filename);
+    const gchar *extension = filename + len - 4;
+    for (i = 0; i < G_N_ELEMENTS (extensions); i++) {
+      if (g_ascii_strcasecmp (extension, extensions[i]) == 0) {
+        valid_extension = TRUE;
+        break;
+      }
+    }
+  }
+
+  if (valid_mimetype || valid_extension) {
+    GstMapInfo map;
+
+    g_mutex_lock (&render->ass_mutex);
+    gst_buffer_map (buf, &map, GST_MAP_READ);
+    ass_add_font (render->ass_library, (gchar *) filename,
+        (gchar *) map.data, map.size);
+    gst_buffer_unmap (buf, &map);
+    GST_DEBUG_OBJECT (render, "registered new font %s", filename);
+    g_mutex_unlock (&render->ass_mutex);
+  }
+}
+
+static void
+gst_ass_render_handle_tags (GstAssRender * render, GstTagList * taglist)
+{
   guint tag_size;
 
   if (!taglist)
@@ -1442,58 +1458,16 @@ gst_ass_render_handle_tags (GstAssRender * render, GstTagList * taglist)
 
   tag_size = gst_tag_list_get_tag_size (taglist, GST_TAG_ATTACHMENT);
   if (tag_size > 0 && render->embeddedfonts) {
-    GstSample *sample;
-    GstBuffer *buf;
-    const GstStructure *structure;
-    gboolean valid_mimetype, valid_extension;
-    guint j;
-    const gchar *filename;
     guint index;
-    GstMapInfo map;
+    GstSample *sample;
 
     GST_DEBUG_OBJECT (render, "TAG event has attachments");
 
     for (index = 0; index < tag_size; index++) {
-      if (!gst_tag_list_get_sample_index (taglist, GST_TAG_ATTACHMENT, index,
-              &sample))
-        continue;
-      buf = gst_sample_get_buffer (sample);
-      structure = gst_sample_get_info (sample);
-      if (!buf || !structure)
-        continue;
-
-      valid_mimetype = FALSE;
-      valid_extension = FALSE;
-
-      for (j = 0; j < G_N_ELEMENTS (mimetypes); j++) {
-        if (gst_structure_has_name (structure, mimetypes[j])) {
-          valid_mimetype = TRUE;
-          break;
-        }
-      }
-      filename = gst_structure_get_string (structure, "filename");
-      if (!filename)
-        continue;
-
-      if (!valid_mimetype) {
-        guint len = strlen (filename);
-        const gchar *extension = filename + len - 4;
-        for (j = 0; j < G_N_ELEMENTS (extensions); j++) {
-          if (g_ascii_strcasecmp (extension, extensions[j]) == 0) {
-            valid_extension = TRUE;
-            break;
-          }
-        }
-      }
-
-      if (valid_mimetype || valid_extension) {
-        g_mutex_lock (&render->ass_mutex);
-        gst_buffer_map (buf, &map, GST_MAP_READ);
-        ass_add_font (render->ass_library, (gchar *) filename,
-            (gchar *) map.data, map.size);
-        gst_buffer_unmap (buf, &map);
-        GST_DEBUG_OBJECT (render, "registered new font %s", filename);
-        g_mutex_unlock (&render->ass_mutex);
+      if (gst_tag_list_get_sample_index (taglist, GST_TAG_ATTACHMENT, index,
+              &sample)) {
+        gst_ass_render_handle_tag_sample (render, sample);
+        gst_sample_unref (sample);
       }
     }
   }
@@ -1681,6 +1655,9 @@ gst_ass_render_event_text (GstPad * pad, GstObject * parent, GstEvent * event)
        * a text segment update */
       GST_ASS_RENDER_BROADCAST (render);
       GST_ASS_RENDER_UNLOCK (render);
+
+      gst_event_unref (event);
+      ret = TRUE;
       break;
     }
     case GST_EVENT_FLUSH_STOP:

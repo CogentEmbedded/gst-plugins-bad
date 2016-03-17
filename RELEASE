@@ -1,18 +1,18 @@
 
-Release notes for GStreamer Bad Plugins 1.6.0
+Release notes for GStreamer Bad Plugins 1.6.3
+
+The GStreamer team is proud to announce the third bugfix release in the stable
+1.6 release series of your favourite cross-platform multimedia framework!
 
 
-The GStreamer team is proud to announce a new major feature release in the
-stable 1.x API series of your favourite cross-platform multimedia framework!
+
+This release only contains bugfixes and it is safe to update from 1.6.x. For a
+full list of bugfixes see Bugzilla.
 
 
-This release has been in the works for more than a year and is packed with new
-features, bug fixes and other improvements.
 
-
-See
-http://gstreamer.freedesktop.org/releases/1.6/
-for the full list of changes.
+See http://gstreamer.freedesktop.org/releases/1.6/
+for the full release notes.
 
 
 
@@ -64,15 +64,11 @@ contains a set of codecs plugins based on libav (formerly gst-ffmpeg)
 
 Bugs fixed in this release
      
-      * 754903 : eagl: crashes or no video display on reuse
-      * 755249 : gtkglsink: Hide and cleaned the GtkWindow we might create
-      * 755251 : gtksink: Rework threading around GtkWindow creation
-      * 755411 : mpdparser: Only check stream- > segments for a repeated last segment if we have a static list of segments
-      * 755426 : decklinkvideosrc: Can't go to PAUSED again from READY
-      * 755456 : glmemory: fix texture leak in _gl_mem_copy
-      * 755459 : gtksink: Do not show window until we reach the PAUSED state
-      * 755542 : gtk: Fix a race where we end up setting wrong VideoInfo
-      * 755618 : gstglfilter: fix error GL_INVALID_OPERATION " glBindBuffer: buffer bound to more than 1 " 
+      * 756573 : pcapparse: Crash in presence of empty packet
+      * 758286 : qtitem: GstQSGTexture leaks in updatePaintNode
+      * 760127 : mpegtsmux: Reserve bits not set to to 1's
+      * 760551 : shmsink: Deadlock in memory free
+      * 760883 : gl: Black screen on Android after update from 1.6.1 to 1.6.2
 
 ==== Download ====
 
@@ -109,9 +105,10 @@ subscribe to the gstreamer-devel list.
         
 Contributors to this release
     
-      * Arun Raghavan
-      * Julien Isorce
-      * Matthew Waters
+      * Bob Holcomb
+      * Matt Crane
       * Sebastian Dröge
-      * Thibault Saunier
+      * Sergey Borovkov
+      * Tim Sheridan
+      * Tim-Philipp Müller
  

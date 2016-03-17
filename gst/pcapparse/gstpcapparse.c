@@ -576,7 +576,11 @@ gst_pcap_parse_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
              * buffer with a single memory, since the RTP depayloaders expect
              * the complete RTP header to be in the first memory if there are
              * multiple ones and we can't guarantee that with _fast() */
-            out_buf = gst_adapter_take_buffer (self->adapter, payload_size);
+            if (payload_size > 0) {
+              out_buf = gst_adapter_take_buffer (self->adapter, payload_size);
+            } else {
+              out_buf = gst_buffer_new ();
+            }
             gst_adapter_flush (self->adapter,
                 self->cur_packet_size - offset - payload_size);
 
@@ -717,7 +721,8 @@ gst_pcap_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       break;
     case GST_EVENT_FLUSH_STOP:
       gst_pcap_parse_reset (self);
-      break;
+      /* Push event down the pipeline so that other elements stop flushing */
+      /* fall through */
     default:
       ret = gst_pad_push_event (self->src_pad, event);
       break;

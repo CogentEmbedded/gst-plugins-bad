@@ -1,64 +1,44 @@
-This is GStreamer 1.6.0
+This is GStreamer 1.6.3
 
-The GStreamer team is proud to announce a new major feature release in the
-stable 1.x API series of your favourite cross-platform multimedia framework!
+The GStreamer team is proud to announce the third bugfix release in the stable
+1.6 release series of your favourite cross-platform multimedia framework!
 
-This release has been in the works for more than a year and is packed with new
-features, bug fixes and other improvements.
+This release only contains bugfixes and it is safe to update from 1.6.x. For a
+full list of bugfixes see Bugzilla:
+  https://bugzilla.gnome.org/buglist.cgi?bug_status=RESOLVED&bug_status=VERIFIED&limit=0&list_id=91562&order=bug_id&product=GStreamer&resolution=FIXED&target_milestone=1.6.3
 
-See http://gstreamer.freedesktop.org/releases/1.6/ for the full list of
-changes.
+See http://gstreamer.freedesktop.org/releases/1.6/ for the latest version of this document.
 
-Highlights
+Major bugfixes
 
-- Stereoscopic 3D and multiview video support
-- Trick mode API for key-frame only fast-forward/fast-reverse playback etc.
-- Improved DTS (decoding timestamp) vs. PTS (presentation timestamp) handling
-  to account for negative DTS
-- New GstVideoConverter API for more optimised and more correct conversion of
-  raw video frames between all supported formats, with rescaling
-- v4l2src now supports renegotiation
-- v4l2transform can now do scaling
-- V4L2 Element now report Colorimetry properly
-- Easier chunked recording of MP4, Matroska, Ogg, MPEG-TS: new splitmuxsink
-  and multifilesink improvements
-- Content Protection signalling API and Common Encryption (CENC) support for
-  DASH/MP4
-- Many adaptive streaming (DASH, HLS and MSS) improvements
-- New PTP and NTP network client clocks and better remote clock tracking
-  stability
-- High-quality text subtitle overlay at display resolutions with glimagesink
-  or gtkglsink
-- RECORD support for the GStreamer RTSP Server
-- Retransmissions (RTX) support in RTSP server and client
-- RTSP seeking support in client and server has been fixed
-- RTCP scheduling improvements and reduced size RTCP support
-- MP4/MOV muxer acquired a new "robust" mode of operation which attempts to
-  keep the output file in a valid state at all times
-- Live mixing support in aggregator, audiomixer and compositor was improved a
-  lot
-- compositor now supports rescaling and converting inputs streams on the fly
-- New audiointerleave element with proper input synchronisation and live input
-  support
-- Blackmagic Design DeckLink capture and playback card support was rewritten
-  from scratch; 2k/4k support; mode sensing
-- KLV metadata support in RTP and MPEG-TS
-- H.265 video encoder (x265), decoders (libav, libde265) and RTP payloader and
-  depayloaders
-- New DTLS plugin and SRTP/DTLS support
-- OpenGL3 support, multiple contexts and context propagation, 3D video,
-  transfer/conversion separation, subtitle blending
-- New OpenGL-based QML video sink, Gtk GL video sink, CoreAnimation
-  CAOpenGLLayerSink video sink
-- gst-libav switched to ffmpeg as libav-provider, gains support for
-  3D/multiview video, trick modes, and the CAVS codec
-- GstHarness API for unit tests
-- gst-editing-services got a completely new ges-launch-1.0 interface, improved
-  mixing support and integration into gst-validate
-- gnonlin has been deprecated in favor of nle (Non Linear Engine) in
-  gst-editing-services
-- gst-validate has a new plugin system, an extensive default testsuite,
-  support for concurrent test runs and valgrind support
-- cerbero build tool for SDK binary packages gains new 'bundle-source' command
-- Various improvements to the Android, iOS, OS X and Windows platform support
+- Fix regression in GL library that made glimagesink unsable on Android
+- Integer arithmetic overflow in queue2 element that could break buffering or
+  cause crashes due to NULL pointer dereference
+- Fix crash in AAC/ADTS typefinder caused by reading more memory than is
+  available
+- Stop ignoring encoder errors in the VP8/VP9 encoders
+- Deprecate GstVideoEncoder GST_VIDEO_ENCODER_FLOW_DROPPED. It's redudant and
+  was never actually implemented
+- Ensure to store the correct video info in GstVideoBufferPool
+- Fix caps in rtspsrc when doing SRTP over interleaved TCP
+- Fix crash in pcap parser on 0-sized packets
+- Clear EOS flag in appsrc to allow reuse after EOS and flushing
+- Ignore flushing streams in streamsynchronizer during stream switches to fix
+  problems caused by this in gst-editing-services
+- Ignore tags and other metadata in WAV files after the "data" chunk in PUSH
+  mode to prevent them from being interpreted as audio
+- Correctly use colorimetry in v4l2 only for YUV color formats
+- Set reserved bits in MPEG TS muxer to 1s
+- Fix calculation of SBC frame lengths
+- Fix output of the RTP JPEG2000 depayloader to have one frame per buffer
+  and crash in the OpenJPEG decoder on incomplete frames
+- Update ffmpeg snapshot in gst-libav to 2.8.5
+- Memory leak fixes in scaletempo, the raw video RTP depayloader,
+  and in playsink related to audio/video filters
+- Fixes for error handling in the OSX audio plugin
+- Various gobject-introspection annotation fixes and additions
+- Compiler warning fixes for latest clang compiler
+- and many, many more:
+  https://bugzilla.gnome.org/buglist.cgi?bug_status=RESOLVED&bug_status=VERIFIED&limit=0&list_id=91562&order=bug_id&product=GStreamer&resolution=FIXED&target_milestone=1.6.3
+
 
