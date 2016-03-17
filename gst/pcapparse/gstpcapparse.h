@@ -73,6 +73,10 @@ struct _GstPcapParse
   gint32 dst_port;
   GstCaps *caps;
   gint64 offset;
+  gchar* ethertype_str;
+  guint16 ethertype;
+  gchar* mac_addr_str;
+  guint8 mac_addr[6];
 
   /* state */
   GstAdapter * adapter;
