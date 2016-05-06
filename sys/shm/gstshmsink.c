@@ -423,7 +423,7 @@ gst_shm_sink_class_init (GstShmSinkClass * klass)
       gst_static_pad_template_get (&sinktemplate));
 
   gst_element_class_set_static_metadata (gstelement_class,
-      "Shared Memory Sink",
+      "Shared Memory Sink (timestamp hack)",
       "Sink",
       "Send data over shared memory to the matching source",
       "Olivier Crete <olivier.crete@collabora.co.uk>");

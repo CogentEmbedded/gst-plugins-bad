@@ -114,6 +114,7 @@ void *sp_writer_buf_get_tag (ShmBuffer * buffer);
 
 ShmPipe *sp_client_open (const char *path);
 long int sp_client_recv (ShmPipe * self, char **buf);
+long int sp_client_recv2 (ShmPipe * self, char **buf, uint64_t *timestamp);
 int sp_client_recv_finish (ShmPipe * self, char *buf);
 void sp_client_close (ShmPipe * self);
 

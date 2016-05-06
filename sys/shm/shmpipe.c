@@ -46,6 +46,7 @@
 #include <limits.h>
 #include <sys/mman.h>
 #include <assert.h>
+#include <gst/gstbuffer.h>
 
 #include "shmalloc.h"
 
@@ -117,7 +118,7 @@ struct _ShmBuffer
   ShmBuffer *next;
 
   void *tag;
-
+  
   int num_clients;
   /* This must ALWAYS stay last in the struct */
   int clients[0];
@@ -140,6 +141,8 @@ struct _ShmPipe
   int num_clients;
   ShmClient *clients;
 
+  unsigned long int timestamp;
+  
   mode_t perms;
 };
 
@@ -174,6 +177,7 @@ struct CommandBuffer
     {
       unsigned long offset;
       unsigned long size;
+      uint64_t pts;
     } buffer;
     struct
     {
@@ -617,6 +621,7 @@ sp_writer_send_buf (ShmPipe * self, char *buf, size_t size, void *tag)
     struct CommandBuffer cb = { 0 };
     cb.payload.buffer.offset = offset;
     cb.payload.buffer.size = bsize;
+    cb.payload.buffer.pts = GST_BUFFER_PTS(tag);
     if (!send_command (client->fd, &cb, COMMAND_NEW_BUFFER, self->shm_area->id))
       continue;
     sb->clients[i++] = client->fd;
@@ -654,6 +659,12 @@ recv_command (int fd, struct CommandBuffer *cb)
 
 long int
 sp_client_recv (ShmPipe * self, char **buf)
+{
+    return sp_client_recv2(self, buf, NULL);
+}
+
+long int
+sp_client_recv2 (ShmPipe * self, char **buf, uint64_t *timestamp)
 {
   char *area_name = NULL;
   ShmArea *newarea;
@@ -703,6 +714,8 @@ sp_client_recv (ShmPipe * self, char **buf)
       for (area = self->shm_area; area; area = area->next) {
         if (area->id == cb.area_id) {
           *buf = area->shm_area_buf + cb.payload.buffer.offset;
+          if (timestamp != NULL)
+              *timestamp = cb.payload.buffer.pts;
           sp_shm_area_inc (area);
           return cb.payload.buffer.size;
         }
